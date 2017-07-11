@@ -1,6 +1,7 @@
 #ini -------------------------
 ExtractDataPath = "W:/R/data/July/"
 ExtractDataPathTarget  = paste0(ExtractDataPath,"data")
+
 if(!dir.exists(ExtractDataPath)){
   
   dir.create(ExtractDataPath)
