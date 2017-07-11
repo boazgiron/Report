@@ -1,0 +1,1048 @@
+---
+title: "June Report (ver1)"
+author: "Boaz Giron"
+date: "04/07/2017"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+library(tidyr)
+library(dplyr)
+library(plyr)
+library(ggplot2)
+library(reshape)
+library("scales", lib.loc="C:/Program Files/R/R-3.3.2/library")
+knitr::opts_chunk$set(echo = TRUE)
+
+# set pander table-layout options
+library(pander)
+panderOptions('table.alignment.default', function(df)
+    ifelse(sapply(df, is.numeric), 'right', 'left'))
+panderOptions('table.split.table', Inf)
+panderOptions('big.mark', ",")
+panderOptions('keep.trailing.zeros', TRUE)
+
+
+monthNum = 6
+CurrentMonth =  strptime(c("2017-06-01 00:00:01","2017-07-01 00:00:01"), "%Y-%m-%d %H:%M:%S" )
+
+cat("\n#",  "Number of Tests  \n")
+cat("\n")
+LnumDeviceTrans  = data.frame( Location  = c( rep("Burlington",length(c("L204", "L205", "L206", "L208", "L209"))),
+                                              rep("Raritan",length(c("L207", "L210"))),
+                                              rep("Austin",length("L211")) ),
+LNums  = c( 204, 205, 206, 208, 209,207,210, 211 ),
+DeviceNumber = c(1329, 1333, 1344, 1359, 1351, 1364, 1350, 1037 ) )
+
+```
+
+```{r,echo=FALSE,message=FALSE,results="asis"}
+
+#Functions
+
+getsystem <- function(x)
+{
+  y =strsplit(x,"/")[[1]]
+  y[length(y)]
+}
+
+
+# Multiple plot function
+#
+# ggplot objects can be passed in ..., or to plotlist (as a list of ggplot objects)
+# - cols:   Number of columns in layout
+# - layout: A matrix specifying the layout. If present, 'cols' is ignored.
+#
+# If the layout is something like matrix(c(1,2,3,3), nrow=2, byrow=TRUE),
+# then plot 1 will go in the upper left, 2 will go in the upper right, and
+# 3 will go all the way across the bottom.
+#
+multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
+  library(grid)
+  
+  # Make a list from the ... arguments and plotlist
+  plots <- c(list(...), plotlist)
+  
+  numPlots = length(plots)
+  
+  # If layout is NULL, then use 'cols' to determine layout
+  if (is.null(layout)) {
+    # Make the panel
+    # ncol: Number of columns of plots
+    # nrow: Number of rows needed, calculated from # of cols
+    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                     ncol = cols, nrow = ceiling(numPlots/cols))
+  }
+  
+  if (numPlots==1) {
+    print(plots[[1]])
+    
+  } else {
+    # Set up the page
+    grid.newpage()
+    pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+    
+    # Make each plot, in the correct location
+    for (i in 1:numPlots) {
+      # Get the i,j matrix positions of the regions that contain this subplot
+      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+      
+      print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+                                      layout.pos.col = matchidx$col))
+    }
+  }
+}
+
+
+prepareDate <- function(ds){
+  
+  dsout  = ( strsplit(ds,"[.]") [[1]]) [1]
+  dsout 
+}
+
+lastZipfile <- function( dirpath )
+{
+  zfiles = dir(dirpath,full.names=TRUE)
+  zfiles = zfiles[( grepl(".Zip",zfiles) | grepl(".zip",zfiles) )]
+  zfilesout  <- zfiles[order(file.info(zfiles, extra_cols = FALSE)[,"mtime"],decreasing = T)]
+  zfilesout[1]
+}
+
+MonthZipfile <- function( dirpath, monthNum1 )
+{
+  zfiles = dir(dirpath,full.names=TRUE)
+  zfiles = zfiles[( grepl(".Zip",zfiles) | grepl(".zip",zfiles) )]
+  fitime = file.info(zfiles, extra_cols = FALSE)[,"mtime"]
+  zfiles = zfiles[as.numeric(format(fitime, "%m")) >= monthNum1]
+  #zfilesout  <- zfiles[order(file.info(zfiles, extra_cols = FALSE)[,"mtime"],decreasing = F)]
+  zfiles
+}
+
+
+preOnefileServiceLogUNZIP <- function (zfilesList){
+  
+  if ( file.exists("C:/Temp/ServiceLogFile") == FALSE){
+    dir.create("C:/Temp/ServiceLogFile")
+  }
+  oneFile = NULL
+  i=0
+  for ( ezip in zfilesList ){
+    i=i+1
+    unout <-unzip(ezip, files = "Logs/*", list = T, overwrite = TRUE, 
+                junkpaths = FALSE, exdir = "c:/Temp", unzip = "internal", setTimes = FALSE)
+    efiles = unout$Name[grepl("ServiceLogFile.mpba",unout$Name)  ]
+    if ( length(efiles) > 0 ) {
+      unzip(ezip, files = efiles, list = F, overwrite = TRUE, junkpaths = FALSE ,  paste0("C:/Temp/ServiceLogFile/f",i),unzip = "internal",  setTimes = FALSE)
+    }
+  }
+}
+
+
+preOnefileServiceLogConvertToText <-function(){
+  
+  filempbalist = paste0(dir("C:/Temp/ServiceLogFile",full.names = T),"/Logs/ServiceLogFile.mpba")
+  filempbalisttxt = paste0(dir("C:/Temp/ServiceLogFile",full.names = T),"/ServiceLogFile.txt")
+  runstring1 = "C:/4.4.3forBoazOnly_/MPBALoggerViewer.exe "
+  i=0
+  for(fl in filempbalist){
+    i =i+1
+    runstring2 = paste0(runstring1,fl," -search  SAVE_ALL_TEXT ",filempbalisttxt[i])
+    system(runstring2,wait = T ) 
+  
+  }
+}
+
+MakeOneFile <- function(){
+  
+  filempbalisttxt = paste0(dir("C:/Temp/ServiceLogFile",full.names = T),"/ServiceLogFile.txt")
+  OneFileBuff  = NULL
+  
+  for(fl in filempbalisttxt){
+    
+    da =read.csv(fl,header = F,stringsAsFactors = F,sep = ";")
+    colnames(da) <-c("Date","Type","process","mass")
+    da$Date <- sapply(da$Date,prepareDate)
+    da$DateC = as.POSIXct(as.character(da$Date),format = "%d/%m/%Y%H:%M:%S")
+    OneFileBuff = rbind(OneFileBuff,da )
+  }
+  
+  OneFileBuff = unique(OneFileBuff)
+  OneFileBuff = OneFileBuff[order(OneFileBuff$DateC),]
+  OneFileBuff
+  
+}
+
+
+agf <-function(x){
+  
+  round(c(mean(x),sd(x)),2)
+  
+}
+
+System2Device <- function(inSystem){
+  
+  out = LnumDeviceTrans$DeviceNumber[ LnumDeviceTrans$LNums  == inSystem ]
+  out
+}
+
+
+
+Lnum2Device <-function(Lnuminput)
+{LnumDeviceTrans$DeviceNumber[LnumDeviceTrans$LNum == Lnuminput]}
+
+Device2Lnum <-function(Deviceinput)
+{LnumDeviceTrans$Lnum[LnumDeviceTrans$DeviceNumber == Deviceinput]}
+
+Lnum2Location <-function(Lnuminput)
+{as.character(LnumDeviceTrans$Location[LnumDeviceTrans$LNum == Lnuminput])}
+Device2Location <-function(Deviceinput)
+{as.character(LnumDeviceTrans$Location[LnumDeviceTrans$DeviceNumber == Deviceinput])}
+
+pathtodata  = paste0("X:/fracas/Systems/L2",c("04","05","06","07","08","09","10","11","12","13","14","15"),"/")
+names1 = c("04","05","06","07","08","09","10","11","12","13","14","15")[1:7]
+pathtodata = pathtodata[1:7]
+
+names1 = c("04","05","06","07","08","09","10","11")
+pathtodata  = paste0("X:/fracas/Systems/L2",names1,"/")
+ExtractDataPathResult = paste0(ExtractDataPath,"Results/")   
+
+ExtractDataPath = "W:/R/data/JUNE/"
+if(!dir.exists(ExtractDataPath)) {
+  
+  dir.create(ExtractDataPath)
+  dir.create(ExtractDataPathResult)
+}
+
+```
+
+```{r,echo=FALSE,message=FALSE,results="asis"}
+
+#temp
+if(FALSE){
+
+  buffSystemTestDatePath = paste0(ExtractDataPath,"buffSystemTestDate",".csv")
+
+if(!file.exists(buffSystemTestDatePath))
+{
+  
+  
+  
+
+  #Find the first file after The month 
+  lzipfiles  = lapply(pathtodata,MonthZipfile,monthNum)
+  names(lzipfiles) <- names1
+  
+  j = 0
+  
+  for(lz in lzipfiles ){
+    j=j+1
+    preOnefileServiceLogUNZIP(lz)
+    preOnefileServiceLogConvertToText()
+    OneFileResult =  MakeOneFile()
+    #filter Month
+    OneFileResult1 = OneFileResult[ OneFileResult$DateC > CurrentMonth[1]  &  OneFileResult$DateC  < CurrentMonth[2],]
+    dirdelet = dir("C:/Temp/ServiceLogFile",full.names = T )
+    unlink(dirdelet, recursive=TRUE)
+    write.csv(OneFileResult1,paste0("C:/Temp/Target/d",names1[j],".csv"))
+  }
+  
+  
+  dafiles = dir("C:/Temp/Target/",full.names = T)
+  danames = dir("C:/Temp/Target/",full.names = T)
+  getNum  <- function(x){st = strsplit(x, "[^[:digit:]]")[[1]] ;st[st != ""]}
+  danames  = paste0("2",unlist(lapply(danames,getNum)))
+  
+  j= 0
+  buffSystemTestDate = NULL
+  for(fl in dafiles){
+    j=j+1
+    da1 = read.csv(fl,header = T, stringsAsFactors = F)
+    da1$DateC = as.POSIXct(as.character(da1$DateC),format = "%Y-%m-%d %H:%M:%S")
+    da1Result125ST = da1[grepl("SystemTest25Process",da1$process) & grepl("Starting SystemTest",da1$mass),]
+    buffSystemTestDate = rbind( buffSystemTestDate, cbind(System = rep(danames[j],length(da1Result125ST$DateC) ) ,Date  = da1Result125ST$DateC )  )
+  }
+  
+  
+  buffSystemTestDate = as.data.frame(buffSystemTestDate)
+  
+  write.csv(buffSystemTestDate,buffSystemTestDatePath)
+
+
+
+}else{
+
+  
+  buffSystemTestDate = read.csv(buffSystemTestDatePath,header = T,stringsAsFactors = F)
+  
+
+
+}
+
+}
+
+#da1Result125ST = da1[grepl("SystemTest25Process",da1$process) & grepl("Starting SystemTest",da1$mass),]
+#dim(da1Result125ST)
+#da1BagTestProcess = da1[grepl("BagTestProcess",da1$process) & grepl(" Starting HPyloriBagsTest",da1$mass),]
+
+
+```
+
+
+```{r,echo=FALSE,message=FALSE,results="asis"}
+
+
+if(!file.exists(paste0(ExtractDataPath,"butCurrentMonth",".csv")))
+{
+  
+
+  #Extract CSV  Files
+  #ty = LnumDeviceTrans$Location
+  
+  #Csv path file
+  # dirpathBurlington = "X:/RD/Team Members/Yifat/LabCorp/Burlington/May 2017/data/" 
+  #   "W:/R/Yifat/2017april/data"
+  # dirpathRaritan    = "X:/RD/Team Members/Yifat/LabCorp/Raritan/May 2017"
+  # 
+  # flBurlington = list.files(dirpathBurlington,full.names = TRUE, recursive = FALSE)
+  # flRaritan = list.files(dirpathRaritan,full.names = TRUE, recursive = FALSE)
+  # 
+  # systemBurlington = as.numeric(unlist(lapply(flBurlington,getsystem)))
+  # systemRaritan = as.numeric(unlist(lapply(flRaritan,getsystem)))
+  # 
+  # flBurlingtons = paste0(flBurlington,"/system_test_results.csv")
+  # flflRaritans = paste0(flRaritan,"/system_test_results.csv")
+  # flBurlingtont = paste0(flBurlington,"/test_results.csv")
+  # flflRaritant = paste0(flRaritan,"/test_results.csv")
+  # fls = c (flBurlingtons, flflRaritans)
+  # flt = c (flBurlingtont, flflRaritant)
+  # systems = c(systemBurlington,systemRaritan)
+  # 
+  # #systems = as.numeric(unlist(lapply(fl,function(x){(strsplit(x,"/")[[1]])[5]})))
+  #systems = list.files(dirpath,full.names = FALSE)
+  
+  #  i=0
+  # bus = NULL
+  # for(wf in fls){
+  #   i=i+1
+  #   re = read.csv(wf,header = T)
+  #   re <- within(re,Location <- Lnum2Location(systems[i])) 
+  #   re <- within(re,System <- systems[i] ) 
+  #   bus <- rbind(bus,re)
+  # }
+  # 
+  # 
+  # i=0
+  # but = NULL
+  # 
+  # for(wf in flt){
+  #   i=i+1
+  #   re = read.csv(wf,header = T)
+  #   re <- within(re,Location <- Lnum2Location(systems[i])) 
+  #   re <- within(re,System <- systems[i]) 
+  #   but <- rbind(but,re)
+  # }
+  
+  
+  but  = read.csv(paste0(ExtractDataPath,"but.csv"),header = T,stringsAsFactors = F)
+  but  = within(but,Location <- unlist(lapply(System,Lnum2Location)))
+  but  = within(but,DeviceNumber <- unlist(lapply(System,Lnum2Device)))
+  but <- within(but,Time <- strptime(as.character(ResultTime), "%Y-%m-%d %H:%M:%S" ))
+  butCurrentMonth = but[ but$Time > CurrentMonth[1]  & but$Time  < CurrentMonth[2],]
+  
+  bus  = read.csv(paste0(ExtractDataPath,"bus.csv"),header = T,stringsAsFactors = F)
+  bus  = within(bus,Location <- unlist(lapply(System,Lnum2Location)))
+  bus  = within(bus,DeviceNumber <- unlist(lapply(System,Lnum2Device)))
+  bus <- within(bus,Time <- strptime(as.character(StartTime), "%Y-%m-%d %H:%M:%S" ))
+  busCurrentMonth = bus[bus$Time > CurrentMonth[1]  &  bus$Time  < CurrentMonth[2],]
+  butCurrentMonth23 <-  butCurrentMonth[butCurrentMonth$TestType %in% c(2,3),]
+  butCurrentMonth <-  butCurrentMonth[butCurrentMonth$TestType %in% c(1,5), ]
+  
+  
+  write.csv( busCurrentMonth, paste0(ExtractDataPath,"busCurrentMonth",".csv") )
+  write.csv( butCurrentMonth, paste0(ExtractDataPath,"butCurrentMonth",".csv") )  
+  write.csv( butCurrentMonth23, paste0(ExtractDataPath,"butCurrentMonth23",".csv") )  
+  #write.csv( but,paste0(ExtractDataPath,"but",".csv") )  
+  #write.csv( bus,paste0(ExtractDataPath,"bus",".csv") )  
+
+}else{
+  
+  busCurrentMonth =   read.csv( paste0(ExtractDataPath,"busCurrentMonth",".csv"),header = T,stringsAsFactors = F)
+  butCurrentMonth =   read.csv( paste0(ExtractDataPath,"butCurrentMonth",".csv"),header = T,stringsAsFactors = F)  
+  butCurrentMonth23 = read.csv( paste0(ExtractDataPath,"butCurrentMonth23",".csv"),header = T,stringsAsFactors = F )  
+  but = read.csv( paste0(ExtractDataPath,"but",".csv"),header = T,stringsAsFactors = F )  
+  bus = read.csv( paste0(ExtractDataPath,"bus",".csv"),header = T,stringsAsFactors = F )  
+}
+
+ResultFile = NULL
+
+```
+
+
+```{r,echo=FALSE,message=FALSE,results="asis"}
+NumberofSuccessfulTests = dim(butCurrentMonth[butCurrentMonth$TestResultCode == 1,])[1]
+RF = cbind(Name = "NumberofSuccessfulTests",Value = NumberofSuccessfulTests )
+ResultFile = rbind( ResultFile,RF )
+cat("  \n##",  "Number of Successful Tests - ",NumberofSuccessfulTests,"  \n")
+
+le = dim(butCurrentMonth23)[1]
+second = butCurrentMonth23[2:le,c("DeviceNumber","PairId","BatchId")]
+first = butCurrentMonth23[1:(le-1),c("DeviceNumber","PairId","BatchId")]
+colnames(second) = paste0("Second_",c("DeviceNumber","PairId","BatchId"))
+df = cbind(first,second)
+dublicateControlNumber = with(df,which(DeviceNumber ==  Second_DeviceNumber &  PairId == Second_PairId  & BatchId == Second_BatchId ))
+
+
+NumberofControls = dim(butCurrentMonth23[-dublicateControlNumber,])[1]
+cat("  \n##",  "Number of Controls  - ",NumberofControls,"  \n")
+RF = cbind(Name = "NumberofControls",Value = NumberofControls  )
+ResultFile = rbind( ResultFile,RF )
+
+butCurrentMonthSuc =  butCurrentMonth[butCurrentMonth$TestResultCode == 1,]
+cat("  \n#",  "Successful Tests\n")
+cat("  \n##",  "Location  \n")
+cat("  \n")
+resultperLocation  = as.data.frame(table(butCurrentMonthSuc$Location))
+colnames(resultperLocation) <- c("Location","NumberOfTests")
+su = data.frame(Location = "All",NumberOfTests = sum(resultperLocation["NumberOfTests"]))
+resultperLocation = rbind(resultperLocation,su)
+kable(resultperLocation)
+cat("  \n")
+locations = unique(butCurrentMonth$Location)
+
+cat("  \n##",  "Devices  \n")
+cat("  \n")
+
+for (ty in locations){
+  resultpresytem  = as.data.frame(table(butCurrentMonthSuc[butCurrentMonthSuc$Location == ty,]$System))
+  colnames(resultpresytem) <- c("System","NumberOfTest")
+  cat("  \n###",  ty, "  \n")
+  cat("  \n")
+  print(kable(resultpresytem))
+  cat("  \n")
+}
+
+sel = butCurrentMonth$PortNumber[1:(length(butCurrentMonth$PortNumber) -1)] == butCurrentMonth$PortNumber[2:length(butCurrentMonth$PortNumber)]
+sel = sel & butCurrentMonth$BatchId[1:(length(butCurrentMonth$PortNumber)-1)] == butCurrentMonth$BatchId[2:length(butCurrentMonth$PortNumber)]
+sel  = sel & (butCurrentMonth$TestResultCode[1:(length(butCurrentMonth$PortNumber)-1)] != 166 )
+
+butCurrentMonth = butCurrentMonth[!sel,]
+
+```
+
+
+```{r,echo=FALSE,message=FALSE,results="asis"}
+
+cat("  \n#",  "Controls  \n")
+ty = unique(butCurrentMonth23$Location)
+
+butCurrentMonth23$Result <- as.numeric(butCurrentMonth23$Result)
+
+sp = split(butCurrentMonth23$Result,list(butCurrentMonth23$TestType,butCurrentMonth23$System))
+spr = lapply(sp,mean)
+
+spname = strsplit(names(sp),"[.]")
+sa = NULL
+j= 0
+for( s in spname ){
+  j=j+1
+  sa = rbind(sa,c(as.numeric(s),round((spr[[j]])[1],1)))
+}  
+
+cat("  \n###",  "Controls Average Results  \n")
+
+colnames(sa)  = c("Type","System","Value")
+sa = as.data.frame(sa)
+re = spread(sa, key = Type, value = Value)
+colnames(re) <- c("System","Positive","Negative")
+meanNegative = round(mean(as.numeric(butCurrentMonth23[butCurrentMonth23$TestType == 2,]$Result)),1)
+meanpositive = round(mean(as.numeric(butCurrentMonth23[butCurrentMonth23$TestType == 3,]$Result)),1)
+df = data.frame(System = "All",Negative = meanNegative,Positive = meanpositive )
+
+re = rbind(re,df)
+kable(re)
+
+cat("  \n###",  "Locations  \n")
+re  = as.data.frame(table(butCurrentMonth23[-dublicateControlNumber,]$Location))
+colnames(re) <- c("Control Location","Freq")
+kable(re)
+
+cat("  \n###",  "Devices  \n")
+re = as.data.frame(table(butCurrentMonth23[-dublicateControlNumber,]$System))
+colnames(re) <- c("Device","Freq")
+kable(re)
+
+cat("  \n###",  "Control End Test Code  \n")
+re = as.data.frame(table(butCurrentMonth23[-dublicateControlNumber,]$TestResultCode))
+colnames(re) <- c("Code","Freq")
+re$'pre%' <- paste(" -> ",as.character(100*round(re[,"Freq"]/sum(re[,"Freq"]),3)),"%")
+kable(re)
+
+cat("  \n###",  "Control End Test Code vs. System \n")
+re = as.data.frame(table(butCurrentMonth23[-dublicateControlNumber,]$TestResultCode , butCurrentMonth23[-dublicateControlNumber,]$System))
+colnames(re) <- c("Code","System","Freq")
+re = spread(re, key = Code, value = Freq)
+kable(re)
+
+```
+
+
+
+
+```{r,echo=FALSE,message=FALSE,results="asis"}
+cat("  \n#",  "All Tests\n")
+cat("  \n##",  "Location  \n")
+cat("  \n")
+
+cat("  \n#",  "Location  \n")
+cat("  \n")
+resultperLocation  = as.data.frame(table(butCurrentMonth$Location))
+colnames(resultperLocation) <- c("Location","NumberOfTests")
+su = data.frame(Location = "All",NumberOfTests = sum(resultperLocation["NumberOfTests"]))
+resultperLocation = rbind(resultperLocation,su)
+write.csv(resultperLocation,paste0(ExtractDataPathResult,"ResultPerLocation.csv"))
+kable(resultperLocation)
+cat("  \n")
+locations = unique(butCurrentMonth$Location)
+
+cat("  \n#",  "Devices  \n")
+cat("  \n")
+
+for (ty in locations){
+  resultpresytem  = as.data.frame(table(butCurrentMonth[butCurrentMonth$Location == ty,]$System))
+  colnames(resultpresytem) <- c("System","NumberOfTest")
+  cat("  \n#",  ty, "  \n")
+  cat("  \n")
+  write.csv(resultpresytem,paste0(ExtractDataPathResult,ty,"_ResultPerSystem.csv"))
+  print(kable(resultpresytem))
+  cat("  \n")
+}
+cat("  \n")
+cat("  \n#",  "Test Code Locations  \n")
+tr = as.data.frame.matrix(table(butCurrentMonth$Location,butCurrentMonth$TestResultCode))
+colnames(tr) <- paste0("Code-",colnames(tr))
+kable(tr)
+cat("  \n")
+
+trcolsum =  apply(tr,2,sum)
+trrowsum =  apply(tr,1,sum)
+trr = round(100* tr/trrowsum,2)
+trp = round(100* t(t(tr)/trcolsum),1)
+
+cat("  \n#",  "Test Code Locations  \n")
+kable(trr)
+cat("  \n")
+cat("  \n#",  "Test Code Locations  \n")
+kable(trp)
+cat("  \n")
+cat("  \n#",  "TestCode Per Devices  \n")
+
+for (ty in locations){
+  cat("  \n#",  ty, "  \n")
+  cat("  \n")
+  tr = as.data.frame.matrix(table(butCurrentMonth[butCurrentMonth$Location == ty,]$System,butCurrentMonth[butCurrentMonth$Location == ty,]$TestResultCode))
+  colnames(tr) <- paste0("Code-",colnames(tr))
+  #print(ty)
+  cat("\n### Number TestCode per Device","  \n")
+  cat("  \n")
+  write.csv(tr,paste0(ExtractDataPathResult,ty,"_TestCode.csv"))
+  print(kable(tr))
+  cat("  \n")
+  cat("\n### TestCode per Device","  \n")
+  cat("  \n")
+  
+  trcolsum =  apply(tr,2,sum)
+  trrowsum =  apply(tr,1,sum)
+  trr = round(100* tr/trrowsum,2)
+  write.csv(trr,paste0(ExtractDataPathResult,ty,"_TestCode1.csv"))
+  print(kable(trr))
+  cat("  \n")
+  cat("\n### % Device per Test Code","  \n")
+  cat("  \n")
+  cat("  \n")
+  trp = round(100* t(t(tr)/trcolsum),1)
+  write.csv(trp,paste0(ExtractDataPathResult,ty,"_preTestCode.csv"))
+  print(kable(trp))
+  cat("  \n\n\n")
+}
+  
+```
+
+
+```{r,echo=FALSE,message=FALSE,results="asis"}
+
+cat("\n# Number of System test per System   \n")
+#bus <- within(bus,Time <- strptime(as.character(StartTime), "%Y-%m-%d %H:%M:%S" ))
+#busCurrentMonth = but[ bus$Time > CurrentMonth[1]  & bus$Time  < CurrentMonth[2],]
+#bus <- within(bus,Time <- strptime(as.character(StartTime), "%Y-%m-%d %H:%M:%S" ))
+#busCurrentMonth = bus[bus$Time > CurrentMonth[1]  &  bus$Time  < CurrentMonth[2],]
+re = as.data.frame(table(busCurrentMonth$System))
+colnames(re) <- c("System","Freq")
+kable(re)
+cat("\n# System Test EndTest Code   \n")
+kable(table(busCurrentMonth$System,busCurrentMonth$TestResultCode))
+if(FALSE){
+  sp = split(butCurrentMonth[butCurrentMonth$TestType == 1,], butCurrentMonth[butCurrentMonth$TestType == 1,]$System)
+  
+  na  = names(sp)
+  j = 0
+  s = sp[[1]]
+  for ( s in sp ){
+    j= j+1
+    te = strptime(as.character(s$Time), "%Y-%m-%d %H:%M:%S" )
+    ve = buffSystemTestDate[as.character(buffSystemTestDate$System) == na[j],]$Date
+    ve = strptime(as.character(ve), "%Y-%m-%d %H:%M:%S" )
+    cat("  \n##", na[j] ,"  \n")
+    #print(kable(table(findInterval(te,ve)) ) )
+    print(kable(table(findInterval(te,ve) ) ))
+  }
+}
+
+
+
+
+```
+
+
+
+```{r,echo=FALSE,message=FALSE,results="asis"}
+
+daDOB = read.csv(paste0(ExtractDataPath,"DOBsData.csv"),header = T , stringsAsFactors = F)
+daDOB = daDOB[daDOB$DeviceNumber %in% LnumDeviceTrans$DeviceNumber,]
+#colnames(daDOB)
+
+
+butCurrentMonthSuc  = within(butCurrentMonthSuc,DeviceNumber <- unlist(lapply(butCurrentMonthSuc$System,System2Device)))
+butCurrentMonthSuc$TestNumber <- as.character(butCurrentMonthSuc$TestNumber)
+
+```
+
+
+
+
+```{r,echo=FALSE,message=FALSE,results="asis"}
+
+
+if(FALSE){
+RatioData = read.csv("X:/RD/Team Members/Mor/Data_7.6/TestResultsCsv/RatiosData.csv",header = T , stringsAsFactors = F)
+RatioData <- melt(RatioData , id = c("DeviceNumber","TestNumber"))
+head(RatioData)
+}
+
+```
+
+
+
+
+```{r,echo=FALSE,message=FALSE,results="asis"}
+
+fileMePath = paste0(ExtractDataPath,"meSuccessDOB.csv")
+
+```
+
+```{r,echo=FALSE,message=FALSE,results="asis"}
+if (!file.exists(fileMePath)){
+  butTestDevice = butCurrentMonthSuc[,c("DeviceNumber","TestNumber")]
+  butTestDevice$TestNumber <- as.numeric(butTestDevice$TestNumber)
+  butCurrentMonthSuc$TestNumber <- as.numeric(butCurrentMonthSuc$TestNumber)
+  butCurrentMonthSuc$Time <- as.POSIXct(butCurrentMonthSuc$Time)
+  #butdobs = daDOB[,c("DeviceNumber","TestNumber","DOB")]
+  #me = inner_join(butTestDevice,butdobs,by = c("DeviceNumber","TestNumber"))
+  me = inner_join(butCurrentMonthSuc,daDOB,by = c("DeviceNumber","TestNumber"))
+  
+  if( dim(butCurrentMonthSuc)[1] - dim(me)[1]  >  50 ) {
+    
+    
+    cat("\n#", "Missing Data !!!!   \n")
+    
+  }
+  
+  
+  ##--
+  range(daDOB[daDOB$DeviceNumber == 1359,]$TestNumber)
+  range(butCurrentMonthSuc[butCurrentMonthSuc$DeviceNumber == 1359,]$TestNumber)
+  #--
+  write.csv(me,fileMePath)  
+}else{
+  
+  me = read.csv(fileMePath,header = T,stringsAsFactors = F)
+} 
+
+```
+
+#Results Analysis
+________________________________________________________________________________
+
+```{r,echo=FALSE,message=FALSE,results="asis"}
+cat("\n### DOB","  \n")
+
+dobs = me$DOB
+sel = dobs  > -5 & dobs  < 5
+hist(dobs[sel],main  = "DOBs in the range of +/-5",xlab = "DOBs")
+me1 = round(mean(dobs[sel]),2)
+STD = round(sd(dobs[sel]),3)
+text(-2,1000,paste("Mean =",me1))
+text(-2,700,paste( "Std  =",STD))
+abline(v = me1,col = 3 ,lwd = 2 ,lty = 2)
+abline(v = c(me1-2*STD,me1 + 2*STD),col = 2 ,lwd = 1 ,lty = 2)
+
+
+```
+
+```{r,echo=FALSE,message=FALSE,results="asis"}
+
+sel = me$DOB > -5 & me$DOB < 5
+mesel = me[sel,]
+
+re= aggregate(mesel$DOB,list(mesel$System),agf)
+ta = data.frame(Device = re$Group.1,Mean = re$x[,1],STD = re$x[,2])
+colnames(ta) = c("System","Mean","STD")
+ta <- data.frame(ta)
+ta$l <- ifelse(ta$Mean > 1.3,"+","") 
+cat("\n####", "DOBs in the range of +/-5 Statistics  \n")
+kable(ta)
+
+
+```
+
+```{r,echo=FALSE,message=FALSE,results="asis"}
+
+re= aggregate(mesel$DOB,list(mesel$System),agf)
+re$x <- round(re$x,2)
+ggplot(mesel, aes(x=DOB)) + geom_histogram(binwidth=0.1,colour="Blue") + facet_grid(System ~.) + ggtitle("DOBs in the range of +/-5 per device")
+
+
+# mesel$dt <- as.Date(mesel$Time)
+# ggplot(mesel, aes(x = dt,y = DOB)) + geom_point(aes(color = System,size = 0.2 )) + facet_grid( System~.) + ggtitle("DOBs in the range of +/-5 per device") + scale_size_continuous(range = c(0.1,0.3)) + scale_x_date(breaks = date_breaks("week"), labels = date_format("%d %b"))
+
+```
+
+```{r,echo=FALSE,message=FALSE,results="asis"}
+mesel$dt <- as.Date(mesel$Time)
+ggplot(mesel, aes(x = dt,y = DOB)) + geom_point(aes(color = System,size = 0.2 )) + facet_grid( .~System) + 
+ggtitle("DOBs in the range of +/-5 per device") + geom_smooth(method = lm, se = FALSE ) + scale_x_discrete(limits=c("time")) 
+
+```
+
+```{r,echo=FALSE,message=FALSE,results="asis"}
+sel = (me$DOB > -6 & me$DOB < -4) | (me$DOB < 6 & me$DOB > 4 )
+
+mesel = me[sel,]
+
+
+re = aggregate(me$DOB,list(me$DeviceNumber),length)
+re1 = aggregate(mesel$DOB,list(mesel$DeviceNumber),length)
+
+ZeroDevice = re[!(re[,1] %in% re1[,1]),1]
+
+if ( length( ZeroDevice )  > 0 ){
+  
+  cb = cbind(Group.1  = ZeroDevice, x = rep(0,length(ZeroDevice)))
+  re1 = rbind(re1,cb)
+}
+
+re = re[order(re[,1]),]
+re1 = re1[order(re1[,1]),]
+
+colnames(re1) = c("Device","NearThreshold")
+re$NearThreshold <-  paste0(round(100*re1$NearThreshold/re$x,2),"%")
+
+colnames(re) <- c("Device","Number","NearThreshold")
+
+#cat("\n### Near Theashold DOB Result","  \n" )
+kable(re,caption = "Near Theashold DOB Result" )
+
+```
+
+```{r,echo=FALSE,message=FALSE,results="asis"}
+
+#cat("\n### DOB Result Less Than -1","  \n")
+sel = me$DOB < -1
+mesel = me[sel,]
+re1 = aggregate(mesel$DOB,list(mesel$DeviceNumber),length)
+re = aggregate(me$DOB,list(me$DeviceNumber),length)
+
+ZeroDevice = re[!(re[,1] %in% re1[,1]),1]
+
+if ( length( ZeroDevice )  > 0 ){
+  
+  cb = cbind(Group.1  = ZeroDevice, x = rep(0,length(ZeroDevice)))
+  re1 = rbind(re1,cb)
+}
+
+re = re[order(re[,1]),]
+re1 = re1[order(re1[,1]),]
+
+
+colnames(re1) = c("Device","LessThan_1")
+re$LessThan_1 <-  paste0(round(100*re1$LessThan_1/re$x,2),"%")
+re$l <- ifelse(re$LessThan_1 == max(re$LessThan_1),"Max","") 
+colnames(re) = c("Device","LessThan-1","-","-")
+kable(re,caption  = "DOB Result Less Than -1")
+
+
+```
+
+
+```{r,echo=FALSE,message=FALSE,results="asis"}
+
+cat("\n##", "Concentration Analysis  \n")
+
+ggplot(me, aes(x= BaselineConcentrationRange)) + geom_histogram(binwidth=0.002,colour="Blue") + facet_grid(System ~.) + ggtitle("Baseline Concentration Range per device")
+
+```
+
+```{r,echo=FALSE,message=FALSE,results="asis"}
+
+Mean= aggregate(mesel$BaselineConcentrationRange,list(mesel$System),mean)
+STD= aggregate(mesel$BaselineConcentrationRange,list(mesel$System),sd)[,2]
+df  =  data.frame(Mean = round(Mean,4),STD = round(STD,4))
+colnames(df) = c("Device","Mean","STD")
+kable(df,caption = "Baseline Concentration Range Per device")
+
+```
+
+```{r,echo=FALSE,message=FALSE,results="asis"}
+
+ggplot(me, aes(x= SampleBaselineConcentrationDiff)) + geom_histogram(binwidth=0.01,colour="Blue") + facet_grid(System ~.) + ggtitle("Sample Baseline Concentration Diff per device")
+```
+
+```{r,echo=FALSE,message=FALSE,results="asis"}
+
+Mean= aggregate(mesel$SampleBaselineConcentrationDiff,list(mesel$System),mean)
+STD= aggregate(mesel$SampleBaselineConcentrationDiff,list(mesel$System),sd)[,2]
+df  =  data.frame(Mean = round(Mean,2),STD = round(STD,3))
+colnames(df) = c("Device","Mean","STD")
+kable(df,caption = "Sample Baseline Concentration Diff Per Device")
+
+```
+
+```{r,echo=FALSE,message=FALSE,results="asis"}
+
+ggplot(me, aes(x= C13BaselineConcentration)) + geom_histogram(binwidth=0.01,colour="Blue") + facet_grid(System ~.) + ggtitle("Baseline C13 Concentration  per device")
+```
+
+
+```{r,echo=FALSE,message=FALSE,results="asis"}
+
+Mean= aggregate(mesel$C13BaselineConcentration,list(mesel$System),mean)
+STD= aggregate(mesel$C13BaselineConcentration,list(mesel$System),sd)[,2]
+df  =  data.frame(Mean = round(Mean,1),STD = round(STD,2))
+colnames(df) = c("Device","Mean","STD")
+
+kable(df, caption = "C13 Baseline Concentration")
+```
+
+```{r,echo=FALSE,message=FALSE,results="asis"}
+
+mesel = me[mesel$C13BaselineConcentration > 1.0,]
+Mean= aggregate(mesel$C13BaselineConcentration,list(mesel$System),mean)
+STD= aggregate(mesel$C13BaselineConcentration,list(mesel$System),sd)[,2]
+df  =  data.frame(Mean = round(Mean,1),STD = round(STD,2))
+colnames(df) = c("Device","Mean","STD")
+
+kable(df,caption  = "C13 Baseline Concentration more than 1")
+
+```
+
+
+```{r,echo=FALSE,message=FALSE,results="asis"}
+
+
+mesel = me[mesel$C13BaselineConcentration < 0.8,]
+ggplot(mesel, aes(x= C13BaselineConcentration)) + geom_histogram(binwidth=0.02,colour="Blue") + 
+facet_grid(System ~.) + 
+ggtitle("C13 low Concentration < 0.8 pre Device ")
+```
+
+```{r,echo=FALSE,message=FALSE,results="asis"}
+
+
+cat("\n##", "Low C13 concentration < 0.8  \n")
+
+mesel_count = aggregate(mesel$TestNumber,list(mesel$System),length)
+me_count = aggregate(me$TestNumber,list(me$System),length)
+
+ZeroDevice = me_count[!(me_count[,1] %in% mesel_count[,1]),1]
+
+if ( length( ZeroDevice )  > 0 ){
+  
+  cb = cbind(Group.1  = ZeroDevice, x = rep(0,length(ZeroDevice)))
+  mesel_count = rbind(mesel_count,cb)
+}
+
+c1 = mesel_count[order(mesel_count[,1]),1]
+c2 = mesel_count[order(mesel_count[,1]),2]
+c3 = paste0(round(100*mesel_count[order(mesel_count[,1]),2]/me_count[order(me_count[,1]),2],1),"%")
+df = data.frame( Device = c1, Count =  c2,Count_ = c3)
+kable(df,caption = "Low C13 concentration < 0.8 prevalence")
+
+#mesel_count[,1]
+
+#mesel_count[,2]
+
+#unique(mesel$System)
+
+```
+
+
+
+```{r,echo=FALSE,message=FALSE,results="asis"}
+
+Mean= aggregate(me$Icr,list(me$System),mean)
+STD= aggregate(me$Icr,list(me$System),sd)[,2]
+df  =  data.frame(Mean = round(Mean,3),STD = round(STD,3))
+colnames(df) = c("Device","Mean","STD")
+kable(df, caption = "ICR")
+
+me$dt <- as.Date(me$Time)
+ggplot(me, aes(x = dt,y = Icr)) + geom_point(aes(color = System,size = 0.2 )) + facet_grid( System~.) + ggtitle("ICR Dynamics") + scale_size_continuous(range = c(0.1,0.3)) + scale_x_date(breaks = date_breaks("week"), labels = date_format("%d %b")) + geom_smooth(method = lm, se = FALSE )
+
+
+```
+
+
+
+```{r,echo=FALSE,message=FALSE,results="asis"}
+
+cat("\n##", "Noise  \n")
+
+ggplot(me, aes(x= DeltaError)) + geom_histogram(binwidth=0.02,colour="Blue") + facet_grid(System ~.) + ggtitle("DeltaError per device")
+
+Mean= aggregate(mesel$DeltaError,list(mesel$System),mean)
+STD= aggregate(mesel$DeltaError,list(mesel$System),sd)[,2]
+df  =  data.frame(Mean = round(Mean,1),STD = round(STD,2))
+colnames(df) = c("Device","Mean","STD")
+kable(df,caption = "DeltaError per device")
+```
+
+```{r,echo=FALSE,message=FALSE,results="asis"}
+
+
+ggplot(me, aes(x = 1000*DOBStd)) + geom_histogram(binwidth=0.02,colour="Blue") + facet_grid(System ~.) + ggtitle("DOBstd per device")
+```
+
+```{r,echo=FALSE,message=FALSE,results="asis"}
+
+Mean= aggregate(1000*me$DOBStd,list(me$System),mean)
+STD= aggregate(1000*me$DOBStd,list(me$System),sd)[,2]
+df  =  data.frame(Mean = round(Mean,2),STD = round(STD,3))
+colnames(df) = c("Device","Mean Std","STD")
+kable(df,caption = "DOBstd per device")
+```
+
+```{r,echo=FALSE,message=FALSE,results="asis"}
+
+
+
+ggplot(me, aes(x = 1000*DOBStd)) + geom_histogram(binwidth=0.02,colour="Blue") + facet_grid(System ~.) + ggtitle("DOBstd per device")
+
+
+
+```
+
+
+#Appendix 166
+________________________________________________________________________________
+
+
+```{r,echo=FALSE,message=FALSE,results="asis"}
+cat("\n#####\n")
+
+cat("\n# Test Code 166  \n")
+cat("  \n")
+  
+
+w166 = which(butCurrentMonth$TestResultCode == 166)
+w166n = w166-1
+
+w166  = w166[butCurrentMonth[w166,]$TestResultCode != butCurrentMonth[w166n,]$TestResultCode]
+w166p = w166+1
+cat("\n# Number off 166 cases : ",length(w166),"   \n")
+#cat("  \n")
+#print(paste0("Number off 166 cases ",length(w166)))
+
+Code166Location =  as.data.frame(table(butCurrentMonth[w166,]$Location))
+
+print(kable(Code166Location))
+cat("  \n")
+
+Code166System = as.data.frame(table(butCurrentMonth[w166,]$System))
+colnames(Code166System) = c("System","Cases")
+kable(Code166System)
+cat("\n# Retest Code 166   \n")
+
+Code166SystemTestCode = as.data.frame(table(butCurrentMonth[w166p,]$TestResultCode,butCurrentMonth[w166p,]$System))
+colnames(Code166SystemTestCode)  =c("Code","System","Freq")
+
+re = spread(Code166SystemTestCode, key = Code, value = Freq)
+da = data.frame(System="Sum",t(colSums(re[,-1])))
+colnames(da) = colnames(re)
+#re = rbind(re,da)
+kable(re)
+cat("    \n")
+kable(da)
+cat("    \n")
+
+da = data.frame(System="%",100*round(da[,-1]/sum(da[,-1]),3))
+colnames(da) = colnames(re)
+kable(da)
+cat("    \n")
+```
+
+
+```{r,echo=FALSE,message=FALSE,results="asis"}
+cat("\n# Retest Results   \n")
+
+fr = round(as.numeric(butCurrentMonth[w166,]$Result),1)
+sc = round(as.numeric(butCurrentMonth[w166p,]$Result),1)
+
+scode = ifelse(butCurrentMonth[w166p,]$TestResultCode != "1", butCurrentMonth[w166p,]$TestResultCode,"")
+#diffr = rep("",length(fr))
+
+diffr  = ifelse( (abs(fr) >= 5)  != ( sc <= 5), "","*")
+diffDOB = sc - abs(fr)
+
+df  = data.frame(              First = fr,
+                               Second = sc,
+                               Diff = diffr,
+                               SecondCode = scode,
+                               
+                               #                               Location = butCurrentMonth[w166p,]$Location, 
+                               diffDOB  = diffDOB,
+                               SecondCode1  = butCurrentMonth[w166p,]$TestResultCode,
+                               System = butCurrentMonth[w166p,]$System)
+
+
+
+sp   = split(df,df$System)
+nsp = names(sp)
+i = 0 
+for(s in sp ){
+  i =i+1
+  cat("  \n### System - ",  nsp[i], "  \n")
+  #print(paste0("System - ",nsp[i]))
+  print(kable(s[,-(6:7)]))
+  cat("  \n")
+}
+
+```
+
+```{r,echo=FALSE,message=FALSE,results="asis"}
+cat("\n# Different between First and second 166 measurment Average pre System   \n")
+df_nE = df[!(df$SecondCode1 %in% c(149,12)),]
+
+aggregatere = aggregate(df_nE$diffDOB,by = list(df_nE$System),mean)
+colnames(aggregatere) = c("System","AverageDiff")
+
+aggregatere$AverageDiff <- round(aggregatere$AverageDiff,2)
+
+aggregatere <- within(aggregatere,sign <-ifelse(aggregatere$AverageDiff > 0,"Positive","Negative"))
+
+kable(aggregatere)
+cat("\n# Different between First and second 166 measurment sign pre System number of cases   \n")
+
+kable(table(ifelse(df_nE$diffDOB > 0,"Postive","Negative") , df_nE$System ))
+cat("  \n")
+```
+
